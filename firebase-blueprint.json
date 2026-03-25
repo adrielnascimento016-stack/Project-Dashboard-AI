@@ -1,0 +1,112 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "A user of the Moto Analytics Pro system",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "description": "Firebase Auth UID"
+        },
+        "email": {
+          "type": "string",
+          "format": "email"
+        },
+        "name": {
+          "type": "string"
+        },
+        "role": {
+          "type": "string",
+          "enum": ["admin", "gerente", "vendedor"]
+        },
+        "unidade": {
+          "type": "string",
+          "description": "Store unit the user belongs to (if applicable)"
+        },
+        "meta_mes": {
+          "type": "number",
+          "description": "Monthly sales target for sellers"
+        }
+      },
+      "required": ["uid", "email", "name", "role"]
+    },
+    "Venda": {
+      "title": "Venda",
+      "description": "A motorcycle sale record",
+      "type": "object",
+      "properties": {
+        "data": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "vendedor_id": {
+          "type": "string"
+        },
+        "vendedor_nome": {
+          "type": "string"
+        },
+        "unidade": {
+          "type": "string"
+        },
+        "modelo_moto": {
+          "type": "string",
+          "enum": ["Street", "Trail", "Sport"]
+        },
+        "valor_venda": {
+          "type": "number"
+        },
+        "custo_direto": {
+          "type": "number"
+        },
+        "margem_bruta": {
+          "type": "number",
+          "description": "Calculated as valor_venda - custo_direto"
+        }
+      },
+      "required": ["data", "vendedor_id", "vendedor_nome", "unidade", "modelo_moto", "valor_venda", "custo_direto", "margem_bruta"]
+    },
+    "Meta": {
+      "title": "Meta",
+      "description": "Monthly targets for units",
+      "type": "object",
+      "properties": {
+        "mes_referencia": {
+          "type": "string",
+          "description": "Month reference in YYYY-MM format"
+        },
+        "unidade": {
+          "type": "string"
+        },
+        "indicador": {
+          "type": "string",
+          "enum": ["Receita", "Volume", "Margem", "Ticket"]
+        },
+        "valor_meta": {
+          "type": "number"
+        }
+      },
+      "required": ["mes_referencia", "unidade", "indicador", "valor_meta"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": {
+        "$ref": "#/entities/User"
+      },
+      "description": "Users of the system"
+    },
+    "/vendas/{vendaId}": {
+      "schema": {
+        "$ref": "#/entities/Venda"
+      },
+      "description": "Sales records"
+    },
+    "/metas/{metaId}": {
+      "schema": {
+        "$ref": "#/entities/Meta"
+      },
+      "description": "Monthly targets per unit"
+    }
+  }
+}

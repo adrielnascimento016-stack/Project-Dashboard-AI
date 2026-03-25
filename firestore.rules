@@ -1,0 +1,167 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // ===============================================================
+    // Assumed Data Model
+    // ===============================================================
+    // Collection: users
+    // Document ID: {userId}
+    // Fields:
+    //   - uid: string (required)
+    //   - email: string (required)
+    //   - name: string (required)
+    //   - role: string (required, 'admin', 'gerente', 'vendedor')
+    //   - unidade: string (optional)
+    //   - meta_mes: number (optional)
+    //
+    // Collection: vendas
+    // Document ID: {vendaId}
+    // Fields:
+    //   - data: string (required, ISO 8601)
+    //   - vendedor_id: string (required)
+    //   - vendedor_nome: string (required)
+    //   - unidade: string (required)
+    //   - modelo_moto: string (required, 'Street', 'Trail', 'Sport')
+    //   - valor_venda: number (required)
+    //   - custo_direto: number (required)
+    //   - margem_bruta: number (required)
+    // ===============================================================
+
+    // Helper Functions
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function isDocOwner() {
+      return isAuthenticated() && request.auth.uid == resource.data.uid;
+    }
+
+    function uidUnchanged() {
+      return !('uid' in request.resource.data) || request.resource.data.uid == request.auth.uid;
+    }
+
+    function uidNotModified() {
+      return !('uid' in request.resource.data) || request.resource.data.uid == resource.data.uid;
+    }
+
+    function hasRequiredFields(fields) {
+      return request.resource.data.keys().hasAll(fields);
+    }
+
+    function isValidEmail(email) {
+      return email is string && email.matches("^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$");
+    }
+
+    function isValidDateString(dateStr) {
+      return dateStr is string && dateStr.matches("^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}.*Z?$");
+    }
+
+    function getUserDoc() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+
+    function isAdmin() {
+      return isAuthenticated() && (
+        getUserDoc().role == 'admin' || 
+        (request.auth.token.email == "adrielnascimento016@gmail.com" && request.auth.token.email_verified == true)
+      );
+    }
+
+    function isGerenteOf(unidade) {
+      return isAuthenticated() && getUserDoc().role == 'gerente' && (getUserDoc().unidade == unidade || getUserDoc().unidade == 'Todas');
+    }
+
+    function isVendedor(vendedorId) {
+      return isAuthenticated() && getUserDoc().role == 'vendedor' && request.auth.uid == vendedorId;
+    }
+
+    // Domain Validators
+    function isValidUser(data) {
+      return hasRequiredFields(['uid', 'email', 'name', 'role']) &&
+             data.uid is string && data.uid.size() > 0 && data.uid.size() < 100 &&
+             data.email is string && isValidEmail(data.email) && data.email.size() < 100 &&
+             data.name is string && data.name.size() > 0 && data.name.size() < 100 &&
+             data.role in ['admin', 'gerente', 'vendedor'] &&
+             (!('unidade' in data) || (data.unidade is string && data.unidade.size() < 100)) &&
+             (!('meta_mes' in data) || (data.meta_mes is number && data.meta_mes >= 0));
+    }
+
+    function isValidVenda(data) {
+      return hasRequiredFields(['data', 'vendedor_id', 'vendedor_nome', 'unidade', 'modelo_moto', 'valor_venda', 'custo_direto', 'margem_bruta']) &&
+             isValidDateString(data.data) &&
+             data.vendedor_id is string && data.vendedor_id.size() > 0 && data.vendedor_id.size() < 100 &&
+             data.vendedor_nome is string && data.vendedor_nome.size() > 0 && data.vendedor_nome.size() < 100 &&
+             data.unidade is string && data.unidade.size() > 0 && data.unidade.size() < 100 &&
+             data.modelo_moto in ['Street', 'Trail', 'Sport'] &&
+             data.valor_venda is number && data.valor_venda >= 0 &&
+             data.custo_direto is number && data.custo_direto >= 0 &&
+             data.margem_bruta is number;
+    }
+
+    function isValidMeta(data) {
+      return hasRequiredFields(['mes_referencia', 'unidade', 'indicador', 'valor_meta']) &&
+             data.mes_referencia is string && data.mes_referencia.matches("^\\d{4}-\\d{2}$") &&
+             data.unidade is string && data.unidade.size() > 0 && data.unidade.size() < 100 &&
+             data.indicador in ['Receita', 'Volume', 'Margem', 'Ticket'] &&
+             data.valor_meta is number && data.valor_meta >= 0;
+    }
+
+    match /users/{userId} {
+      allow read: if isAuthenticated() && (isOwner(userId) || isAdmin() || isGerenteOf(resource.data.unidade));
+      
+      // Only admins can create new users, or a user creating their own profile initially (if they are the default admin)
+      allow create: if isAuthenticated() && isValidUser(request.resource.data) && uidUnchanged() && (
+        isAdmin() || 
+        (isOwner(userId) && request.resource.data.role == 'vendedor') || // Allow self-registration as vendedor
+        (isOwner(userId) && request.auth.token.email == "adrielnascimento016@gmail.com") // Default admin self-registration
+      );
+      
+      // Users can update their own name/email, but not role. Admins can update anything.
+      allow update: if isAuthenticated() && isValidUser(request.resource.data) && uidNotModified() && (
+        isAdmin() || 
+        (isOwner(userId) && request.resource.data.role == resource.data.role && request.resource.data.unidade == resource.data.unidade)
+      );
+      
+      allow delete: if isAdmin();
+    }
+
+    match /vendas/{vendaId} {
+      allow read: if isAuthenticated() && (
+        isAdmin() || 
+        isGerenteOf(resource.data.unidade) || 
+        isVendedor(resource.data.vendedor_id)
+      );
+      
+      allow create: if isAuthenticated() && isValidVenda(request.resource.data) && (
+        isAdmin() || 
+        isGerenteOf(request.resource.data.unidade) || 
+        isVendedor(request.resource.data.vendedor_id)
+      );
+      
+      allow update: if isAuthenticated() && isValidVenda(request.resource.data) && (
+        isAdmin() || 
+        isGerenteOf(resource.data.unidade) || 
+        isVendedor(resource.data.vendedor_id)
+      );
+      
+      allow delete: if isAdmin() || isGerenteOf(resource.data.unidade);
+    }
+
+    match /metas/{metaId} {
+      allow read: if isAuthenticated() && (
+        isAdmin() || 
+        isGerenteOf(resource.data.unidade) || 
+        getUserDoc().role == 'vendedor' // Vendedores podem ver metas da sua unidade? Sim, vamos permitir leitura geral para autenticados, ou restrito.
+      );
+      
+      allow create: if isAuthenticated() && isValidMeta(request.resource.data) && isAdmin();
+      allow update: if isAuthenticated() && isValidMeta(request.resource.data) && isAdmin();
+      allow delete: if isAdmin();
+    }
+  }
+}
